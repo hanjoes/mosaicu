@@ -6,7 +6,7 @@ from processor import PNGProcessor
 def process(args):
     # TODO: recognize file formats
     processor = PNGProcessor(args.pic)
-    processor.spit_meta()
+    processor.get_metadata()
 
 
 if __name__ == '__main__':
