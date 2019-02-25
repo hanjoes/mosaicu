@@ -61,9 +61,9 @@ class PNGProcessor(ImageProcessor):
                 self._data.extend(chunk_data)
 
             if chunk_type in self._chunk_hist:
-                self._chunk_hist[type] += 1
+                self._chunk_hist[chunk_type] += 1
             else:
-                self._chunk_hist[type] = 1
+                self._chunk_hist[chunk_type] = 1
 
             if chunk_type == 'IEND':
                 break
@@ -83,6 +83,8 @@ class PNGProcessor(ImageProcessor):
         print(f'length: {len(data)}')
         check = self._data[-3]
         print(f'check: {check}')
+        decompressed = zlib.decompress(self._data, wbits=0)
+        print(f'before decompress size was {len(self._data)}, after {len(decompressed)}')
         # zlib.decompress()
 
 
