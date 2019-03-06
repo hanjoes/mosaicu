@@ -44,6 +44,46 @@ class PNGProcessor(ImageProcessor):
     of the CR-LF translation problem.
     """
 
+    # At present, only filter method 0 (adaptive
+    # filtering with five basic filter types) is defined.
+    # PNG filter method 0 defines five basic filter types:
+    FILTER_TYPE_LOOKUP = {
+        0: "None",
+        1: "Sub",
+        2: "Up",
+        3: "Average",
+        4: "Paeth"
+    }
+
+    # Bit depth restrictions for each color type are imposed to
+    # simplify implementations and to prohibit combinations that do
+    # not compress well.  Decoders must support all legal
+    # combinations of bit depth and color type.  The allowed
+    # combinations are:
+    #
+    #    Color    Allowed    Interpretation
+    #    Type    Bit Depths
+    #
+    #    0       1,2,4,8,16  Each pixel is a grayscale sample.
+    #
+    #    2       8,16        Each pixel is an R,G,B triple.
+    #
+    #    3       1,2,4,8     Each pixel is a palette index;
+    #                        a PLTE chunk must appear.
+    #
+    #    4       8,16        Each pixel is a grayscale sample,
+    #                        followed by an alpha sample.
+    #
+    #    6       8,16        Each pixel is an R,G,B triple,
+    #                        followed by an alpha sample.
+    SAMPLE_NUM_LOOKUP = {
+        0: 1,
+        2: 3,
+        3: 1,
+        4: 2,
+        6: 4
+    }
+
     def get_metadata(self):
         print(self._chunk_hist)
 
@@ -84,9 +124,13 @@ class PNGProcessor(ImageProcessor):
         check = self._data[-3]
         print(f'check: {check}')
         decompressed = zlib.decompress(self._data, wbits=0)
-        print(f'before decompress size was {len(self._data)}, after {len(decompressed)}')
-        # zlib.decompress()
+        print(f'before decompress size was {len(data)}, after {len(decompressed)}')
 
+        # Handle scanlines
+        scanline_len = int(len(decompressed) / self._height)
+        for i in range(self._height):
+            scanline = decompressed[i*scanline_len:(i+1)*scanline_len]
+            filtered_data = scanline[1:]
 
     def _validate(self):
         with open(self._file, 'rb') as pic_f:
@@ -131,8 +175,13 @@ class PNGProcessor(ImageProcessor):
               f'bit_depth:{self._bit_depth},'
               f'color_type:{self._color_type},'
               f'compression:{self._compression_method},'
-              f'filter:{self._filter_method},'
+              f'filter:{PNGProcessor.FILTER_TYPE_LOOKUP[self._filter_method]},'
               f'interlace:{self._interlace_method}')
+        self._calculate_pixel_size()
+
+    def _calculate_pixel_size(self):
+        sample_count = PNGProcessor.SAMPLE_NUM_LOOKUP[self._color_type]
+        return sample_count * self._bit_depth / 8
 
     @staticmethod
     def _read_one_chunk(pic_f):
