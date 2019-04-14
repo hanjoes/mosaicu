@@ -1,11 +1,13 @@
 import zlib
 
+
 class ImageProcessor(object):
 
     def __init__(self, file):
         self._file = file
         self._chunk_hist = {}
         self._data = bytearray(b'')
+        self._pixel_size = 0
 
         self._validate()
         self._analyze()
@@ -55,6 +57,30 @@ class PNGProcessor(ImageProcessor):
         4: "Paeth"
     }
 
+    # Color type determines number samples for each pixel
+    # Color    Allowed    Interpretation
+    # Type     Bit Depths
+    #
+    # 0       1,2,4,8,16  Each pixel is a grayscale sample.
+    #
+    # 2       8,16        Each pixel is an R,G,B triple.
+    #
+    # 3       1,2,4,8     Each pixel is a palette index;
+    #                     a PLTE chunk must appear.
+    #
+    # 4       8,16        Each pixel is a grayscale sample,
+    #                     followed by an alpha sample.
+    #
+    # 6       8,16        Each pixel is an R,G,B triple,
+    #                     followed by an alpha sample.
+    COLOR_TYPE_TO_NUM_SAMPLE = {
+        0: 1,
+        2: 3,
+        3: 1,
+        4: 2,
+        6: 4
+    }
+
     # Bit depth restrictions for each color type are imposed to
     # simplify implementations and to prohibit combinations that do
     # not compress well.  Decoders must support all legal
@@ -85,7 +111,7 @@ class PNGProcessor(ImageProcessor):
     }
 
     def get_metadata(self):
-        print(self._chunk_hist)
+        print(f'{"chunk hist:":20}' + ','.join([f'{k}:{v}' for k, v in self._chunk_hist.items()]))
 
     def _walk_chunks(self, pic_f):
         # skipping the first 8 bytes for header
@@ -96,9 +122,11 @@ class PNGProcessor(ImageProcessor):
 
             if chunk_type == 'IHDR':
                 self._analyze_header(chunk_data, length)
+                continue
 
             if chunk_type == 'IDAT':
                 self._data.extend(chunk_data)
+                continue
 
             if chunk_type in self._chunk_hist:
                 self._chunk_hist[chunk_type] += 1
@@ -116,20 +144,20 @@ class PNGProcessor(ImageProcessor):
         # Compressed data blocks:        n bytes
         # Check value:                   4 bytes
         method_flag = self._data[0]
-        print(f'method/flag {method_flag}')
         additional = self._data[1]
-        print(f'additional {additional}')
-        data = self._data[2:-4]
-        print(f'length: {len(data)}')
-        check = self._data[-3]
-        print(f'check: {check}')
+        check = self._data[-4]
         decompressed = zlib.decompress(self._data, wbits=0)
-        print(f'before decompress size was {len(data)}, after {len(decompressed)}')
+        print(f'{"compression spec:":20}'
+              f'method/flag:{method_flag},',
+              f'additional:{additional},'
+              f'check:{check},'
+              f'before deflation:{len(self._data)} bytes,'
+              f'after deflation:{len(decompressed)} bytes')
 
         # Handle scanlines
         scanline_len = int(len(decompressed) / self._height)
         for i in range(self._height):
-            scanline = decompressed[i*scanline_len:(i+1)*scanline_len]
+            scanline = decompressed[i * scanline_len:(i + 1) * scanline_len]
             filtered_data = scanline[1:]
 
     def _validate(self):
@@ -170,10 +198,13 @@ class PNGProcessor(ImageProcessor):
         self._compression_method = int.from_bytes(header_bytes[10:11], 'big')
         self._filter_method = int.from_bytes(header_bytes[11:12], 'big')
         self._interlace_method = int.from_bytes(header_bytes[12:13], 'big')
-        print(f'width:{self._width},'
+        self._pixel_size = self.COLOR_TYPE_TO_NUM_SAMPLE[self._color_type] * self._bit_depth
+        print(f'{"basic spec:":20}'
+              f'width:{self._width},'
               f'height:{self._height},'
               f'bit_depth:{self._bit_depth},'
               f'color_type:{self._color_type},'
+              f'pixel_size(bit):{self._pixel_size},'
               f'compression:{self._compression_method},'
               f'filter:{PNGProcessor.FILTER_TYPE_LOOKUP[self._filter_method]},'
               f'interlace:{self._interlace_method}')
