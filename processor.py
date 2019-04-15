@@ -81,6 +81,70 @@ class PNGProcessor(ImageProcessor):
         6: 4
     }
 
+    @staticmethod
+    def _noop_filter(current, previous, bpp):
+        pass
+
+    @staticmethod
+    def _noop_reverse_filter(current, previous, bpp):
+        pass
+
+    @staticmethod
+    def _sub_filter(current, previous, bpp):
+        """
+        To compute the Sub filter, apply the following formula to each
+        byte of the scanline:
+
+        Sub(x) = Raw(x) - Raw(x-bpp)
+
+        :param current: byte array representing current scanline.
+        :param previous: byte array representing the previous scanline (not used by this filter type)
+        :param bpp: bytes per pixel
+        :return: filtered byte array
+        """
+        for x in range(len(current)):
+            if x == 0 and current[0] != 1:
+                raise IOError(f'{current[0]} passed to Sub reverse filter')
+
+            current[x] = current[x] - current[x - bpp] if x - bpp > 0 else 0
+        return current
+
+    @staticmethod
+    def _sub_reverse_filter(current, previous, bpp):
+        """
+        To reverse the effect of the Sub filter after decompression,
+        output the following value:
+
+        Sub(x) + Raw(x-bpp)
+
+        :param current: byte array representing current scanline.
+        :param previous: byte array representing the previous scanline (not used by this filter type)
+        :param bpp: bytes per pixel
+        :return: reverse-filtered byte array
+        """
+        for x in range(len(current)):
+            if x == 0:
+                if current[0] != 1:
+                    raise IOError(f'{current[0]} passed to Sub reverse filter')
+                continue
+
+            current[x] = (current[x] + current[x - bpp] if x - bpp > 0 else 0) % 256
+        return current
+
+    # PNG filter method 0 defines five basic filter types:
+    #
+    # Type    Name
+    #
+    # 0       None
+    # 1       Sub
+    # 2       Up
+    # 3       Average
+    # 4       Paeth
+    FILTER_TYPE_TO_FUNC = {
+        0: (_noop_filter.__func__, _noop_reverse_filter.__func__),
+        1: (_sub_filter.__func__, _sub_reverse_filter.__func__)
+    }
+
     # Bit depth restrictions for each color type are imposed to
     # simplify implementations and to prohibit combinations that do
     # not compress well.  Decoders must support all legal
@@ -155,10 +219,23 @@ class PNGProcessor(ImageProcessor):
               f'after deflation:{len(decompressed)} bytes')
 
         # Handle scanlines
+        # given each scanline is prepended with 1 byte of the filter
+        # method before compressing, number of bytes each scanline for
+        # the image itself is really:
+        #
+        # len(decompressed)/height - 1
+        #
+        # which is equal to:
+        #
+        # width * number of samples per pixel * bit depth / 8
         scanline_len = int(len(decompressed) / self._height)
         for i in range(self._height):
             scanline = decompressed[i * scanline_len:(i + 1) * scanline_len]
-            filtered_data = scanline[1:]
+            scanline_copy = bytearray(len(scanline))
+            scanline_copy[:] = scanline
+            bpp = int(self._pixel_size / 8)
+            scanline_copy = PNGProcessor.FILTER_TYPE_TO_FUNC[decompressed[0]][1](scanline_copy, None, bpp)
+            print(scanline_copy)
 
     def _validate(self):
         with open(self._file, 'rb') as pic_f:
