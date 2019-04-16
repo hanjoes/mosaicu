@@ -1,3 +1,4 @@
+import binascii
 import zlib
 
 
@@ -102,12 +103,15 @@ class PNGProcessor(ImageProcessor):
         :param bpp: bytes per pixel
         :return: filtered byte array
         """
+        result = bytearray(len(current))
         for x in range(len(current)):
-            if x == 0 and current[0] != 1:
-                raise IOError(f'{current[0]} passed to Sub reverse filter')
+            if x == 0:
+                if current[0] != 1:
+                    raise IOError(f'{current[0]} passed to Sub filter')
+                continue
 
-            current[x] = current[x] - current[x - bpp] if x - bpp > 0 else 0
-        return current
+            result[x] = (current[x] - (current[x - bpp] if x - bpp > 0 else 0)) % 256
+        return result
 
     @staticmethod
     def _sub_reverse_filter(current, previous, bpp):
@@ -122,14 +126,16 @@ class PNGProcessor(ImageProcessor):
         :param bpp: bytes per pixel
         :return: reverse-filtered byte array
         """
+        result = bytearray(len(current))
         for x in range(len(current)):
             if x == 0:
+                result[0] = 1
                 if current[0] != 1:
                     raise IOError(f'{current[0]} passed to Sub reverse filter')
                 continue
 
-            current[x] = (current[x] + current[x - bpp] if x - bpp > 0 else 0) % 256
-        return current
+            result[x] = (current[x] + (current[x - bpp] if x - bpp > 0 else 0)) % 256
+        return result
 
     # PNG filter method 0 defines five basic filter types:
     #
@@ -228,14 +234,36 @@ class PNGProcessor(ImageProcessor):
         # which is equal to:
         #
         # width * number of samples per pixel * bit depth / 8
+        bpp = int(self._pixel_size / 8)
+        _updated_image = bytearray()
         scanline_len = int(len(decompressed) / self._height)
         for i in range(self._height):
-            scanline = decompressed[i * scanline_len:(i + 1) * scanline_len]
-            scanline_copy = bytearray(len(scanline))
-            scanline_copy[:] = scanline
-            bpp = int(self._pixel_size / 8)
+            scanline_copy = bytearray(scanline_len)
+            scanline_copy[:] = decompressed[i * scanline_len:(i + 1) * scanline_len]
+            if i == 0:
+                print(binascii.hexlify(scanline_copy[0:100]))
             scanline_copy = PNGProcessor.FILTER_TYPE_TO_FUNC[decompressed[0]][1](scanline_copy, None, bpp)
-            print(scanline_copy)
+            if i == 0:
+                print(binascii.hexlify(scanline_copy[0:100]))
+            _updated_image.extend(scanline_copy)
+
+        # filter updated data
+        _filtered_image = bytearray()
+        for i in range(self._height):
+            _updated_scanline = bytearray(scanline_len)
+            _updated_scanline[:] = _updated_image[i * scanline_len:(i + 1) * scanline_len]
+            if i == 0:
+                print(binascii.hexlify(_updated_scanline[0:100]))
+            _updated_scanline = PNGProcessor.FILTER_TYPE_TO_FUNC[decompressed[0]][0](_updated_scanline, None, bpp)
+            if i == 0:
+                print(binascii.hexlify(_updated_scanline[0:100]))
+            _filtered_image.extend(_updated_scanline)
+
+        # compress updated image
+        compressed = zlib.compress(_filtered_image)
+
+        print(f'after recompression, size is {len(compressed)}')
+
 
     def _validate(self):
         with open(self._file, 'rb') as pic_f:
