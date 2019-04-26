@@ -257,7 +257,8 @@ class PNGProcessor(ImageProcessor):
             _filtered_image.extend(_updated_scanline)
 
         # compress updated image
-        compressed = zlib.compress(_filtered_image)
+        compressobj = zlib.compressobj(level=1, method=zlib.DEFLATED)
+        compressed = compressobj.compress(_filtered_image)
 
     def _validate(self):
         with open(self._file, 'rb') as pic_f:
