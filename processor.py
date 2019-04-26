@@ -84,11 +84,11 @@ class PNGProcessor(ImageProcessor):
 
     @staticmethod
     def _noop_filter(current, previous, bpp):
-        pass
+        return current
 
     @staticmethod
     def _noop_reverse_filter(current, previous, bpp):
-        pass
+        return current
 
     @staticmethod
     def _sub_filter(current, previous, bpp):
@@ -140,6 +140,33 @@ class PNGProcessor(ImageProcessor):
             current[x] = (current[x] + (current[x - bpp] if x - bpp > 0 else 0)) % 256
         return current
 
+    @staticmethod
+    def _up_filter(current, previous, bpp):
+        result = bytearray(len(current))
+        return result
+
+    @staticmethod
+    def _up_reverse_filter(current, previous, bpp):
+        return current
+
+    @staticmethod
+    def _avg_filter(current, previous, bpp):
+        result = bytearray(len(current))
+        return result
+
+    @staticmethod
+    def _avg_reverse_filter(current, previous, bpp):
+        return current
+
+    @staticmethod
+    def _paeth_filter(current, previous, bpp):
+        result = bytearray(len(current))
+        return result
+
+    @staticmethod
+    def _paeth_reverse_filter(current, previous, bpp):
+        return current
+
     # PNG filter method 0 defines five basic filter types:
     #
     # Type    Name
@@ -151,7 +178,10 @@ class PNGProcessor(ImageProcessor):
     # 4       Paeth
     FILTER_TYPE_TO_FUNC = {
         0: (_noop_filter.__func__, _noop_reverse_filter.__func__),
-        1: (_sub_filter.__func__, _sub_reverse_filter.__func__)
+        1: (_sub_filter.__func__, _sub_reverse_filter.__func__),
+        2: (_up_filter.__func__, _up_reverse_filter.__func__),
+        3: (_avg_filter.__func__, _avg_reverse_filter.__func__),
+        4: (_paeth_filter.__func__, _paeth_reverse_filter.__func__)
     }
 
     # Bit depth restrictions for each color type are imposed to
@@ -245,7 +275,8 @@ class PNGProcessor(ImageProcessor):
         for i in range(self._height):
             scanline_copy = bytearray(scanline_len)
             scanline_copy[:] = decompressed[i * scanline_len:(i + 1) * scanline_len]
-            scanline_copy = PNGProcessor.FILTER_TYPE_TO_FUNC[decompressed[0]][1](scanline_copy, None, bpp)
+            compression_method = scanline_copy[0]
+            scanline_copy = PNGProcessor.FILTER_TYPE_TO_FUNC[compression_method][1](scanline_copy, None, bpp)
             _updated_image.extend(scanline_copy)
 
         # filter updated scanlines
@@ -253,7 +284,8 @@ class PNGProcessor(ImageProcessor):
         for i in range(self._height):
             _updated_scanline = bytearray(scanline_len)
             _updated_scanline[:] = _updated_image[i * scanline_len:(i + 1) * scanline_len]
-            _updated_scanline = PNGProcessor.FILTER_TYPE_TO_FUNC[decompressed[0]][0](_updated_scanline, None, bpp)
+            compression_method = _updated_scanline[0]
+            _updated_scanline = PNGProcessor.FILTER_TYPE_TO_FUNC[compression_method][0](_updated_scanline, None, bpp)
             _filtered_image.extend(_updated_scanline)
 
         # compress updated image
