@@ -1,4 +1,5 @@
 import binascii
+import math
 import zlib
 
 
@@ -152,29 +153,142 @@ class PNGProcessor(ImageProcessor):
 
     @staticmethod
     def _up_filter(current, previous, bpp):
+        """
+        To compute the Up filter, apply the following formula to each byte
+        of the scanline:
+
+        Up(x) = Raw(x) - Prior(x)
+
+        :param current: byte array representing current scanline.
+        :param previous: byte array representing the previous scanline (not used by this filter type)
+        :param bpp: bytes per pixel
+        :return: filtered byte array
+        """
         result = bytearray(len(current))
+        for x in range(len(current)):
+            if x == 0:
+                result[0] = 2
+                if current[0] != 2:
+                    raise IOError(f'{current[0]} passed to Up filter')
+                continue
+
+            result[x] = (current[x] - previous[x] if previous else 0) % 256
         return result
 
     @staticmethod
     def _up_reverse_filter(current, previous, bpp):
+        """
+        To reverse the effect of the Up filter after decompression, output
+        the following value:
+
+        Up(x) + Prior(x)
+
+        :param current: byte array representing current scanline.
+        :param previous: byte array representing the previous scanline (not used by this filter type)
+        :param bpp: bytes per pixel
+        :return: reverse-filtered byte array
+        """
+        for x in range(len(current)):
+            if x == 0:
+                if current[0] != 2:
+                    raise IOError(f'{current[0]} passed to Up reverse filter')
+                continue
+
+            current[x] = (current[x] + (previous[x] if previous else 0)) % 256
         return current
 
     @staticmethod
     def _avg_filter(current, previous, bpp):
+        """
+        To compute the Average filter, apply the following formula to each
+        byte of the scanline:
+
+        Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
+
+        :param current: byte array representing current scanline.
+        :param previous: byte array representing the previous scanline (not used by this filter type)
+        :param bpp: bytes per pixel
+        :return: filtered byte array
+        """
         result = bytearray(len(current))
+        for x in range(len(current)):
+            if x == 0:
+                result[0] = 3
+                if current[0] != 3:
+                    raise IOError(f'{current[0]} passed to Avg filter')
+                continue
+
+            prior = previous[x] if previous else 0
+            raw = current[x - bpp] if x - bpp > 0 else 0
+            result[x] = (current[x] - math.floor((raw + prior) / 2)) % 256
         return result
 
     @staticmethod
     def _avg_reverse_filter(current, previous, bpp):
+        """
+        To reverse the effect of the Average filter after decompression,
+        output the following value:
+
+        Average(x) + floor((Raw(x-bpp)+Prior(x))/2)
+
+        :param current: byte array representing current scanline.
+        :param previous: byte array representing the previous scanline (not used by this filter type)
+        :param bpp: bytes per pixel
+        :return: reverse-filtered byte array
+        """
+        for x in range(len(current)):
+            if x == 0:
+                if current[0] != 3:
+                    raise IOError(f'{current[0]} passed to Avg reverse filter')
+                continue
+
+            prior = previous[x] if previous else 0
+            raw = current[x - bpp] if x - bpp > 0 else 0
+            current[x] = (current[x] + math.floor((raw + prior) / 2)) % 256
         return current
+
+    @staticmethod
+    def _paeth_predictor(a, b, c):
+        p = a + b - c
+        pa = abs(p - a)
+        pb = abs(p - b)
+        pc = abs(p - c)
+
+        if pa <= pb and pa <= pc:
+            return a
+        elif pb <= pc:
+            return b
+        else:
+            return c
 
     @staticmethod
     def _paeth_filter(current, previous, bpp):
         result = bytearray(len(current))
+        for x in range(len(current)):
+            if x == 0:
+                result[0] = 4
+                if current[0] != 4:
+                    raise IOError(f'{current[0]} passed to Paeth filter')
+                continue
+
+            left = current[x - bpp] if x - bpp > 0 else 0
+            above = previous[x] if previous else 0
+            upper_left = previous[x - bpp] if x - bpp > 0 and previous else 0
+            result[x] = (current[x] - PNGProcessor._paeth_predictor(left, above, upper_left)) % 256
         return result
 
     @staticmethod
     def _paeth_reverse_filter(current, previous, bpp):
+        for x in range(len(current)):
+            if x == 0:
+                if current[0] != 4:
+                    raise IOError(f'{current[0]} passed to Paeth reverse filter')
+                continue
+
+            left = current[x - bpp] if x - bpp > 0 else 0
+            above = previous[x] if previous else 0
+            upper_left = previous[x - bpp] if x - bpp > 0 and previous else 0
+            current[x] = (current[x] + PNGProcessor._paeth_predictor(left, above, upper_left)) % 256
         return current
 
     # PNG filter method 0 defines five basic filter types:
@@ -286,21 +400,36 @@ class PNGProcessor(ImageProcessor):
         scanline_len = int(len(decompressed) / self._height)
 
         # reverse filter scanlines
+        previous_line = None
         for i in range(self._height):
             scanline_copy = bytearray(scanline_len)
             scanline_copy[:] = decompressed[i * scanline_len:(i + 1) * scanline_len]
-            compression_method = scanline_copy[0]
-            scanline_copy = PNGProcessor.FILTER_TYPE_TO_FUNC[compression_method][1](scanline_copy, None, bpp)
+            filter_type = scanline_copy[0]
+            scanline_copy = PNGProcessor.FILTER_TYPE_TO_FUNC[filter_type][1](scanline_copy, previous_line, bpp)
             _updated_image.extend(scanline_copy)
+            previous_line = scanline_copy
 
         # filter updated scanlines
         _filtered_image = bytearray()
         for i in range(self._height):
+            if i == 0:
+                previous_line = None
+
             _updated_scanline = bytearray(scanline_len)
             _updated_scanline[:] = _updated_image[i * scanline_len:(i + 1) * scanline_len]
-            compression_method = _updated_scanline[0]
-            _updated_scanline = PNGProcessor.FILTER_TYPE_TO_FUNC[compression_method][0](_updated_scanline, None, bpp)
+            filter_type = _updated_scanline[0]
+            previous_line_cache = _updated_scanline
+            _updated_scanline = PNGProcessor.FILTER_TYPE_TO_FUNC[filter_type][0](_updated_scanline, previous_line, bpp)
             _filtered_image.extend(_updated_scanline)
+            previous_line = previous_line_cache
+
+        if _filtered_image != decompressed:
+            for i in range(self._height):
+                current_decompressed_row = decompressed[i * scanline_len:(i + 1) * scanline_len]
+                _current_updated_row = _filtered_image[i * scanline_len:(i + 1) * scanline_len]
+                if current_decompressed_row != _current_updated_row:
+                    raise ArithmeticError(f'filtering error happened in row: {i} with filter type '
+                                          f'{current_decompressed_row[0]}')
 
         # compress updated image, the compress method with default parameters seem to work well for PNG standard
         compressed = zlib.compress(_filtered_image)
