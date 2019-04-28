@@ -4,8 +4,11 @@ import zlib
 
 class ImageProcessor(object):
 
-    def __init__(self, file):
+    def __init__(self, file, output):
+        self._headding = bytearray()
         self._file = file
+        self._output = output
+        self._chunk_ordering_list = []
         self._chunk_hist = {}
         self._data = bytearray(b'')
         self._pixel_size = 0
@@ -21,6 +24,10 @@ class ImageProcessor(object):
 
     def _analyze(self):
         pass
+
+
+def _write_idat(updated_data):
+    pass
 
 
 class PNGProcessor(ImageProcessor):
@@ -46,6 +53,9 @@ class PNGProcessor(ImageProcessor):
     display under MS-DOS.  The final line feed checks for the inverse
     of the CR-LF translation problem.
     """
+
+    # Default size for a IDAT chunk.
+    IDAT_CHUNK_SIZE = 9999999999
 
     # At present, only filter method 0 (adaptive
     # filtering with five basic filter types) is defined.
@@ -213,31 +223,35 @@ class PNGProcessor(ImageProcessor):
         6: 4
     }
 
-    def get_metadata(self):
-        print(f'{"chunk hist:":20}' + ','.join([f'{k}:{v}' for k, v in self._chunk_hist.items()]))
+    def _chunk_hist_str_ordered(self):
+        result_list = []
+        for chunk_name in self._chunk_ordering_list:
+            result_list.append(f'{chunk_name}:{self._chunk_hist[chunk_name]["count"]}')
+        return ','.join(result_list)
 
     def _walk_chunks(self, pic_f):
         # skipping the first 8 bytes for header
-        pic_f.seek(8)
+        self._heading = pic_f.read(8)
 
         while True:
-            length, chunk_type, chunk_data, crc = self._read_one_chunk(pic_f)
+            raw_data, length, chunk_type, chunk_data, crc = self._read_one_chunk(pic_f)
 
             if chunk_type == 'IHDR':
                 self._analyze_header(chunk_data, length)
-                continue
-
-            if chunk_type == 'IDAT':
+            elif chunk_type == 'IDAT':
+                # print(f'reading chunk_length = {length}')
                 self._data.extend(chunk_data)
-                continue
 
             if chunk_type in self._chunk_hist:
-                self._chunk_hist[chunk_type] += 1
+                self._chunk_hist[chunk_type]['count'] += 1
             else:
-                self._chunk_hist[chunk_type] = 1
+                self._chunk_ordering_list.append(chunk_type)
+                self._chunk_hist[chunk_type] = {'raw': raw_data, 'count': 1}
 
             if chunk_type == 'IEND':
                 break
+
+        print(f'{"chunk hist:":20}{self._chunk_hist_str_ordered()}')
 
         # Deflate-compressed datastreams within PNG are stored in the "zlib"
         # format, which has the structure:
@@ -288,9 +302,21 @@ class PNGProcessor(ImageProcessor):
             _updated_scanline = PNGProcessor.FILTER_TYPE_TO_FUNC[compression_method][0](_updated_scanline, None, bpp)
             _filtered_image.extend(_updated_scanline)
 
-        # compress updated image
-        compressobj = zlib.compressobj(level=1, method=zlib.DEFLATED)
-        compressed = compressobj.compress(_filtered_image)
+        # compress updated image, the compress method with default parameters seem to work well for PNG standard
+        compressed = zlib.compress(_filtered_image)
+
+        self._rebuild_image(compressed)
+
+    def _rebuild_image(self, updated_data):
+        with open(self._output, 'wb') as of:
+            of.write(self._heading)
+            for chunk_name in self._chunk_ordering_list:
+                chunk = self._chunk_hist[chunk_name]
+                raw = chunk['raw']
+                if chunk_name != 'IDAT':
+                    of.write(raw)
+                else:
+                    PNGProcessor._write_idat(of, updated_data)
 
     def _validate(self):
         with open(self._file, 'rb') as pic_f:
@@ -348,14 +374,16 @@ class PNGProcessor(ImageProcessor):
 
     @staticmethod
     def _read_one_chunk(pic_f):
+        raw_data = bytearray()
         # Length
         # A 4-byte unsigned integer giving the number of bytes in the
         # chunk's data field. The length counts only the data field, not
         # itself, the chunk type code, or the CRC.  Zero is a valid
         # length.  Although encoders and decoders should treat the length
         # as unsigned, its value must not exceed (2^31)-1 bytes.
-        _chunk_length = pic_f.read(4)
-        length = int.from_bytes(_chunk_length, 'big')
+        chunk_length = pic_f.read(4)
+        raw_data.extend(chunk_length)
+        length = int.from_bytes(chunk_length, 'big')
         # Chunk Type
         # A 4-byte chunk type code.  For convenience in description and
         # in examining PNG files, type codes are restricted to consist of
@@ -367,11 +395,13 @@ class PNGProcessor(ImageProcessor):
         # naming conventions for chunk types are discussed in the next
         # section.
         chunk_type = pic_f.read(4)
+        raw_data.extend(chunk_type)
         chunk_type_str = chunk_type.decode('utf-8')
         # Chunk Data
         # The data bytes appropriate to the chunk type, if any.  This
         # field can be of zero length.
         chunk_data = pic_f.read(length)
+        raw_data.extend(chunk_data)
         # CRC
         # A 4-byte CRC (Cyclic Redundancy Check) calculated on the
         # preceding bytes in the chunk, including the chunk type code and
@@ -379,5 +409,44 @@ class PNGProcessor(ImageProcessor):
         # is always present, even for chunks containing no data.  See CRC
         # algorithm (Section 3.4).
         crc = pic_f.read(4)
+        raw_data.extend(crc)
 
-        return length, chunk_type_str, chunk_data, crc
+        return raw_data, length, chunk_type_str, chunk_data, crc
+
+    @staticmethod
+    def _write_idat(of, updated_data):
+        leftover_data = updated_data
+        end = False
+        # There can be multiple IDAT chunks; if so, they must appear
+        # consecutively with no other intervening chunks.  The compressed
+        # datastream is then the concatenation of the contents of all the
+        # IDAT chunks.  The encoder can divide the compressed datastream
+        # into IDAT chunks however it wishes.  (Multiple IDAT chunks are
+        # allowed so that encoders can work in a fixed amount of memory;
+        # typically the chunk size will correspond to the encoder's
+        # buffer size.) It is important to emphasize that IDAT chunk
+        # boundaries have no semantic significance and can occur at any
+        # point in the compressed datastream.  A PNG file in which each
+        # IDAT chunk contains only one data byte is legal, though
+        # remarkably wasteful of space.  (For that matter, zero-length
+        # IDAT chunks are legal, though even more wasteful.)
+        while not end:
+            if len(leftover_data) > PNGProcessor.IDAT_CHUNK_SIZE:
+                current_chunk = leftover_data[0:PNGProcessor.IDAT_CHUNK_SIZE]
+                leftover_data = leftover_data[PNGProcessor.IDAT_CHUNK_SIZE:]
+            else:
+                current_chunk = leftover_data
+                end = True
+
+            # print(binascii.hexlify(current_chunk)[0:100])
+
+            chunk_length = len(current_chunk).to_bytes(4, 'big')
+            # print(f'chunk_length: {len(current_chunk)}')
+            # print(len(current_chunk))
+            # print(f'chunk_length: {chunk_length}')
+            chunk_type = bytearray('IDAT', 'utf-8')
+            chunk_data = current_chunk
+            crc = zlib.crc32(current_chunk).to_bytes(4, 'big')
+            # crc = CRC32().calculate(current_chunk).to_bytes(4, 'big')
+            of.write(chunk_length + chunk_type + chunk_data + crc)
+
