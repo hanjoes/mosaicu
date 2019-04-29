@@ -29,8 +29,7 @@ class PNGProcessor(ImageProcessor):
     """
 
     # Default size for a IDAT chunk.
-    # TODO: segmentation
-    IDAT_CHUNK_SIZE = 9999999999
+    IDAT_CHUNK_SIZE = 16384
 
     # Color type determines number samples for each pixel
     # Color    Allowed    Interpretation
@@ -294,6 +293,8 @@ class PNGProcessor(ImageProcessor):
         # algorithm (Section 3.4).
         crc = pic_f.read(4)
         raw_data.extend(crc)
+        # print(f'chunk_type: {chunk_type} crc: {int.from_bytes(crc, "big")}, '
+        #       f'calculated: {zlib.crc32(chunk_type + chunk_data)}')
 
         return raw_data, length, chunk_type_str, chunk_data, crc
 
@@ -330,6 +331,5 @@ class PNGProcessor(ImageProcessor):
             # print(f'chunk_length: {chunk_length}')
             chunk_type = bytearray('IDAT', 'utf-8')
             chunk_data = current_chunk
-            crc = zlib.crc32(current_chunk).to_bytes(4, 'big')
-            # crc = CRC32().calculate(current_chunk).to_bytes(4, 'big')
+            crc = zlib.crc32(chunk_type + current_chunk).to_bytes(4, 'big')
             of.write(chunk_length + chunk_type + chunk_data + crc)
