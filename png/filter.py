@@ -1,15 +1,15 @@
 import math
 
 
-def noop_filter(current, previous, bpp):
+def noop(current, previous, bpp):
     return current
 
 
-def noop_reverse_filter(current, previous, bpp):
+def noop_reverse(current, previous, bpp):
     return current
 
 
-def sub_filter(current, previous, bpp):
+def sub(current, previous, bpp):
     """
     To compute the Sub filter, apply the following formula to each
     byte of the scanline:
@@ -35,7 +35,7 @@ def sub_filter(current, previous, bpp):
     return result
 
 
-def sub_reverse_filter(current, previous, bpp):
+def sub_reverse(current, previous, bpp):
     """
     To reverse the effect of the Sub filter after decompression,
     output the following value:
@@ -59,7 +59,7 @@ def sub_reverse_filter(current, previous, bpp):
     return current
 
 
-def up_filter(current, previous, bpp):
+def up(current, previous, bpp):
     """
     To compute the Up filter, apply the following formula to each byte
     of the scanline:
@@ -83,7 +83,7 @@ def up_filter(current, previous, bpp):
     return result
 
 
-def up_reverse_filter(current, previous, bpp):
+def up_reverse(current, previous, bpp):
     """
     To reverse the effect of the Up filter after decompression, output
     the following value:
@@ -105,7 +105,7 @@ def up_reverse_filter(current, previous, bpp):
     return current
 
 
-def avg_filter(current, previous, bpp):
+def avg(current, previous, bpp):
     """
     To compute the Average filter, apply the following formula to each
     byte of the scanline:
@@ -131,7 +131,7 @@ def avg_filter(current, previous, bpp):
     return result
 
 
-def avg_reverse_filter(current, previous, bpp):
+def avg_reverse(current, previous, bpp):
     """
     To reverse the effect of the Average filter after decompression,
     output the following value:
@@ -169,7 +169,7 @@ def paeth_predictor(a, b, c):
         return c
 
 
-def paeth_filter(current, previous, bpp):
+def paeth(current, previous, bpp):
     result = bytearray(len(current))
     for x in range(len(current)):
         if x == 0:
@@ -185,7 +185,7 @@ def paeth_filter(current, previous, bpp):
     return result
 
 
-def paeth_reverse_filter(current, previous, bpp):
+def paeth_reverse(current, previous, bpp):
     for x in range(len(current)):
         if x == 0:
             if current[0] != 4:
@@ -209,9 +209,9 @@ def paeth_reverse_filter(current, previous, bpp):
 # 3       Average
 # 4       Paeth
 FILTER_TYPE_TO_FUNC = {
-    0: (noop_filter, noop_reverse_filter),
-    1: (sub_filter, sub_reverse_filter),
-    2: (up_filter, up_reverse_filter),
-    3: (avg_filter, avg_reverse_filter),
-    4: (paeth_filter, paeth_reverse_filter)
+    0: (noop, noop_reverse),
+    1: (sub, sub_reverse),
+    2: (up, up_reverse),
+    3: (avg, avg_reverse),
+    4: (paeth, paeth_reverse)
 }

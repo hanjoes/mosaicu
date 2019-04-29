@@ -29,6 +29,7 @@ class PNGProcessor(ImageProcessor):
     """
 
     # Default size for a IDAT chunk.
+    # TODO: segmentation
     IDAT_CHUNK_SIZE = 9999999999
 
     # Color type determines number samples for each pixel
@@ -124,13 +125,12 @@ class PNGProcessor(ImageProcessor):
         method_flag = self._data[0]
         additional = self._data[1]
         check = self._data[-4]
-        decompressed = zlib.decompress(self._data, wbits=0)
         print(f'{"compression spec:":20}'
               f'method/flag:{method_flag},',
               f'additional:{additional},'
-              f'check:{check},'
-              f'before deflation:{len(self._data)} bytes,'
-              f'after deflation:{len(decompressed)} bytes')
+              f'check:{check},')
+
+        decompressed = zlib.decompress(self._data)
 
         # Handle scanlines
         # given each scanline is prepended with 1 byte of the filter
@@ -143,45 +143,53 @@ class PNGProcessor(ImageProcessor):
         #
         # width * number of samples per pixel * bit depth / 8
         bpp = int(self._pixel_size / 8)
-        _updated_image = bytearray()
         scanline_len = int(len(decompressed) / self._height)
 
-        # reverse filter scanlines
+        recovered_image = self.recover_image(bpp, decompressed, scanline_len)
+        filtered_image = self.filter_image(bpp, recovered_image, scanline_len)
+
+        self._check_filter_result(filtered_image, decompressed, scanline_len)
+
+        # compress updated image, the compress method with default parameters seem to work well for PNG standard
+        compressed = zlib.compress(filtered_image)
+
+        self._rebuild_image(compressed)
+
+    def filter_image(self, bpp, recovered_image, scanline_len):
+        filtered_image = bytearray()
+        previous_line = None
+        for i in range(self._height):
+            updated_scanline = bytearray(scanline_len)
+            updated_scanline[:] = recovered_image[i * scanline_len:(i + 1) * scanline_len]
+            filter_type = updated_scanline[0]
+            previous_line_cache = updated_scanline
+            updated_scanline = FILTER_TYPE_TO_FUNC[filter_type][0](updated_scanline, previous_line, bpp)
+            filtered_image.extend(updated_scanline)
+            previous_line = previous_line_cache
+        return filtered_image
+
+    def recover_image(self, bpp, decompressed, scanline_len):
+        recovered_image = bytearray()
         previous_line = None
         for i in range(self._height):
             scanline_copy = bytearray(scanline_len)
             scanline_copy[:] = decompressed[i * scanline_len:(i + 1) * scanline_len]
             filter_type = scanline_copy[0]
             scanline_copy = FILTER_TYPE_TO_FUNC[filter_type][1](scanline_copy, previous_line, bpp)
-            _updated_image.extend(scanline_copy)
+            recovered_image.extend(scanline_copy)
             previous_line = scanline_copy
+        return recovered_image
 
-        # filter updated scanlines
-        _filtered_image = bytearray()
-        for i in range(self._height):
-            if i == 0:
-                previous_line = None
-
-            _updated_scanline = bytearray(scanline_len)
-            _updated_scanline[:] = _updated_image[i * scanline_len:(i + 1) * scanline_len]
-            filter_type = _updated_scanline[0]
-            previous_line_cache = _updated_scanline
-            _updated_scanline = FILTER_TYPE_TO_FUNC[filter_type][0](_updated_scanline, previous_line, bpp)
-            _filtered_image.extend(_updated_scanline)
-            previous_line = previous_line_cache
-
-        if _filtered_image != decompressed:
+    def _check_filter_result(self, filtered_image, decompressed, scanline_len):
+        if filtered_image != decompressed:
             for i in range(self._height):
-                current_decompressed_row = decompressed[i * scanline_len:(i + 1) * scanline_len]
-                _current_updated_row = _filtered_image[i * scanline_len:(i + 1) * scanline_len]
-                if current_decompressed_row != _current_updated_row:
+                beg = i * scanline_len
+                end = (i + 1) * scanline_len
+                current_decompressed_row = decompressed[beg:end]
+                current_updated_row = filtered_image[beg:end]
+                if current_decompressed_row != current_updated_row:
                     raise ArithmeticError(f'filtering error happened in row: {i} with filter type '
                                           f'{current_decompressed_row[0]}')
-
-        # compress updated image, the compress method with default parameters seem to work well for PNG standard
-        compressed = zlib.compress(_filtered_image)
-
-        self._rebuild_image(compressed)
 
     def _rebuild_image(self, updated_data):
         with open(self._output, 'wb') as of:
