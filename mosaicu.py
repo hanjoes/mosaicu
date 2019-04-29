@@ -1,6 +1,6 @@
 import argparse
 
-from processor import PNGProcessor
+from png.mosaicu_png import PNGProcessor
 
 
 def process(args):
