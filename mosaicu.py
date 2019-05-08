@@ -50,9 +50,10 @@ def generate_radius_indices(x_center, y_center, radius):
 
 def synchronize_radius(radius, index, bpp, bitmap, pixel, width, height):
     y_center, x_center = convert_to_2d(bitmap, bpp, index)
+    # print(f'index:{index}, y_center:{y_center},x_center:{x_center}')
     radius_indices = generate_radius_indices(x_center, y_center, radius)
     for x, y in radius_indices:
-        if 0 <= x <= width and 0 <= y <= height:
+        if 0 <= x < width and 0 <= y < height:
             i = convert_to_1d(bitmap, bpp, x, y)
             # print(f'x:{x}, y:{y}, i:{i}')
             pixel_at(i, bpp, lambda p: pixel, bitmap)
@@ -81,7 +82,8 @@ def pixel_at(index, bpp, pixel_transform, bitmap):
 
 
 def convert_to_1d(bitmap, bpp, x, y):
-    return y * int(len(bitmap[0]) / bpp) + x
+    row_pixel_count = int(len(bitmap[0]) / bpp)
+    return y * row_pixel_count + x
 
 
 def convert_to_2d(bitmap, bpp, index):
@@ -92,8 +94,9 @@ def convert_to_2d(bitmap, bpp, index):
     :param index: 1-dimensional index
     :return:
     """
-    row_index = int(index / len(bitmap))
-    pixel_index = index % int(len(bitmap[0]) / bpp)
+    row_pixel_count = int(len(bitmap[0]) / bpp)
+    row_index = int(index / row_pixel_count)
+    pixel_index = index % row_pixel_count
     return row_index, pixel_index
 
 
@@ -101,13 +104,14 @@ def process(args):
     # TODO: recognize file formats
     png = PNG(file=args.pic)
     total_pixels = png.width * png.height
+    # print(f'width:{png.width},height:{png.height},total_pixel:{total_pixels}')
 
-    num_seeds = 1000
+    num_seeds = 300
     bpp = int(png.pixel_size_in_bit/8)
     for x in range(num_seeds):
         random_pixel_index = randint(0, total_pixels)
         seed_pixel = pixel_at(random_pixel_index, bpp, None, png.bitmap)
-        synchronize_radius(20, random_pixel_index, bpp, png.bitmap, seed_pixel, png.width, png.height)
+        synchronize_radius(15, random_pixel_index, bpp, png.bitmap, seed_pixel, png.width, png.height)
 
     png.render(output=args.output)
 
